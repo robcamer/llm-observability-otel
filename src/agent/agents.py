@@ -5,6 +5,7 @@ from .instrumentation import traced_span
 # Simple placeholder LLM call; replace with real model (GitHub Models / Azure OpenAI)
 # If OPENAI_API_KEY or GITHUB_MODELS_API_KEY not set, returns stub output.
 
+
 def _call_llm(prompt: str) -> str:
     # Prefer Azure OpenAI if endpoint is present
     azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
@@ -12,15 +13,12 @@ def _call_llm(prompt: str) -> str:
     azure_deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT")
     azure_api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-08-01-preview")
 
-    api_key = (
-        azure_key
-        or os.getenv("OPENAI_API_KEY")
-        or os.getenv("GITHUB_MODELS_API_KEY")
-    )
+    api_key = azure_key or os.getenv("OPENAI_API_KEY") or os.getenv("GITHUB_MODELS_API_KEY")
     if not api_key:
         return f"[stub-response] {prompt[:80]}..."
     try:
         from openai import OpenAI  # type: ignore
+
         if azure_endpoint and azure_deployment:
             # Construct base URL for deployment-specific path
             base_url = f"{azure_endpoint}/openai/deployments/{azure_deployment}"
@@ -33,7 +31,9 @@ def _call_llm(prompt: str) -> str:
             )
         else:
             base_url = os.getenv("OPENAI_BASE_URL") or os.getenv("GITHUB_MODELS_BASE_URL")
-            client = OpenAI(api_key=api_key, base_url=base_url) if base_url else OpenAI(api_key=api_key)
+            client = (
+                OpenAI(api_key=api_key, base_url=base_url) if base_url else OpenAI(api_key=api_key)
+            )
             completion = client.chat.completions.create(
                 model=os.getenv("MODEL_NAME", "openai/gpt-4o-mini"),
                 messages=[{"role": "user", "content": prompt}],
@@ -43,6 +43,7 @@ def _call_llm(prompt: str) -> str:
     except Exception as e:  # noqa: BLE001
         return f"[llm-error-fallback] {e}"
 
+
 @traced_span("planner.agent")
 def planner_agent(state: Dict[str, Any]) -> Dict[str, Any]:
     task = state.get("task", "")
@@ -50,12 +51,14 @@ def planner_agent(state: Dict[str, Any]) -> Dict[str, Any]:
     state["plan"] = plan
     return state
 
+
 @traced_span("worker.agent")
 def worker_agent(state: Dict[str, Any]) -> Dict[str, Any]:
     plan = state.get("plan", "")
     work = _call_llm(f"Execute the following plan and produce a result. Plan: {plan}")
     state["work"] = work
     return state
+
 
 @traced_span("reflection.agent")
 def reflection_agent(state: Dict[str, Any]) -> Dict[str, Any]:
@@ -76,6 +79,7 @@ def reflection_agent(state: Dict[str, Any]) -> Dict[str, Any]:
     state["reflection"] = reflection
     return state
 
+
 @traced_span("reviewer.agent")
 def reviewer_agent(state: Dict[str, Any]) -> Dict[str, Any]:
     work = state.get("work", "")
@@ -86,5 +90,6 @@ def reviewer_agent(state: Dict[str, Any]) -> Dict[str, Any]:
     )
     state["review"] = review
     return state
+
 
 __all__ = ["planner_agent", "worker_agent", "reflection_agent", "reviewer_agent"]

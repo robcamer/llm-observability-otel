@@ -1,5 +1,3 @@
-from typing import List
-
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor, SpanExporter, SpanExportResult
 
@@ -9,7 +7,7 @@ from src.agent.instrumentation import traced_span
 
 class InMemoryExporter(SpanExporter):
     def __init__(self) -> None:
-        self.spans = []  # type: List
+        self.spans = []
 
     def export(self, spans):  # type: ignore[override]
         self.spans.extend(spans)

@@ -3,16 +3,19 @@
 PYTHON?=.venv/bin/python
 PIP?=.venv/bin/pip
 
-.PHONY: help install dev test coverage run clean
+.PHONY: help install dev test coverage run fmt clean
 
 help:
 	@echo "Targets: install | dev | test | coverage | run | clean"
 
 install:
-	$(PIP) install -r requirements.txt
+	$(PIP) install .
 
 dev:
 	$(PIP) install -e .[dev]
+
+freeze:
+	$(PIP) freeze > requirements.lock.txt
 
 test:
 	$(PYTHON) -m pytest
@@ -22,6 +25,10 @@ coverage:
 
 run:
 	$(PYTHON) -m uvicorn src.agent.app:app --reload
+
+fmt:
+	$(PYTHON) -m ruff check . || true
+	$(PYTHON) -m ruff format .
 
 clean:
 	rm -rf .pytest_cache .coverage htmlcov

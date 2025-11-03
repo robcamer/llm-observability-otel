@@ -1,6 +1,7 @@
-from typing import TypedDict, Optional, Dict, Any
+from typing import TypedDict, Any
 from langgraph.graph import StateGraph
 from .agents import planner_agent, worker_agent, reflection_agent, reviewer_agent
+
 
 class GraphState(TypedDict, total=False):
     task: str
@@ -9,7 +10,9 @@ class GraphState(TypedDict, total=False):
     reflection: str
     review: str
 
+
 # Build a simple linear multi-agent workflow: planner -> worker -> reviewer
+
 
 def build_graph() -> Any:
     graph = StateGraph(GraphState)
@@ -27,5 +30,6 @@ def build_graph() -> Any:
 
     graph.set_finish_point("reviewer")
     return graph.compile()
+
 
 __all__ = ["build_graph", "GraphState"]

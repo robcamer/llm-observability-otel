@@ -12,7 +12,10 @@ Containerized multi-agent LangGraph sample instrumented with OpenTelemetry expor
 │       ├── graph.py            # LangGraph workflow assembly
 │       ├── instrumentation.py  # OpenTelemetry + Azure Monitor exporter setup
 │       └── __init__.py
-├── test/test_graph.py          # Basic invocation test (root-level test directory)
+├── test/test_graph.py          # Basic workflow invocation test
+├── test/test_api.py            # FastAPI /run endpoint async test & span assertions
+├── test/test_telemetry.py      # Direct span decorator & error handling tests
+├── Makefile                    # Common dev tasks (install/test/coverage/fmt/run)
 ├── pyproject.toml              # Modern project metadata & dependency management
 ├── infrastructure/             # Terraform IaC for Azure resources
 │   ├── providers.tf
@@ -20,7 +23,6 @@ Containerized multi-agent LangGraph sample instrumented with OpenTelemetry expor
 │   ├── main.tf
 │   └── outputs.tf
 ├── data/                       # Placeholder for future data assets
-├── requirements.txt
 ├── Dockerfile
 ├── docker-compose.yml
 └── README.md
@@ -31,6 +33,8 @@ Containerized multi-agent LangGraph sample instrumented with OpenTelemetry expor
 * Multi-agent workflow (planner → worker → reflection → reviewer) using LangGraph.
 * OpenTelemetry tracing with custom spans per agent.
 * Azure Monitor / Application Insights exporter via connection string.
+* Optional in-memory span exporter for deterministic telemetry tests (`OTEL_INMEMORY_EXPORTER`).
+* Async API + agent workflow tests with coverage & Ruff lint/format (`make fmt`, `make coverage`).
 * Containerized FastAPI service (Dockerfile + docker-compose).
 * Terraform deployment for: Resource Group, Log Analytics Workspace, Application Insights, Container Apps Environment & Container App, Azure OpenAI (Cognitive) account.
 
@@ -46,9 +50,9 @@ Containerized multi-agent LangGraph sample instrumented with OpenTelemetry expor
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt  # or: pip install -e .[dev]
-pytest -q  # configured via pyproject to look in `test/`
-cp .env.example .env  # then edit secrets before running
+pip install -e .[dev]   # single source of truth: pyproject.toml
+pytest -q               # discovers tests in `test/`
+cp .env.example .env    # then edit secrets before running
 uvicorn src.agent.app:app --reload
 ```
 
@@ -145,13 +149,70 @@ traces
 | `AZURE_OPENAI_DEPLOYMENT` | Deployment name (model deployment in Azure) |
 | `AZURE_OPENAI_API_VERSION` | API version query param appended |
 | `AZURE_OPENAI_API_KEY` | Key for Azure OpenAI account |
+| `OTEL_INMEMORY_EXPORTER` | When `1`/`true`, adds in-memory span exporter for tests |
+
+## Makefile Workflow
+
+Common developer tasks are scripted in the `Makefile`:
+
+| Target | Action |
+|--------|--------|
+| `make install` | Install production deps from pyproject (PEP 621) |
+| `make freeze` | Generate pinned snapshot `requirements.lock.txt` |
+| `make dev` | Editable install with dev extras (`pytest`, coverage, ruff`) |
+| `make test` | Run test suite (quiet configured in pyproject) |
+| `make coverage` | Run tests with coverage report (term-missing) |
+| `make run` | Start FastAPI app with reload (`uvicorn src.agent.app:app --reload`) |
+| `make fmt` | Ruff lint (non-failing) then auto-format code |
+| `make clean` | Remove caches and coverage artifacts |
+
+Example:
+
+```bash
+make dev
+make fmt   # optional style tidy
+make test
+make coverage
+```
+
+## Telemetry Testing & In-Memory Exporter
+
+Set `OTEL_INMEMORY_EXPORTER=1` to capture spans in memory for assertions (no Azure dependency):
+
+```bash
+export OTEL_INMEMORY_EXPORTER=1
+pytest -k test_api
+```
+
+Tests (`test/test_api.py`, `test/test_telemetry.py`) validate:
+* Agent span names (`planner.agent`, `worker.agent`, `reflection.agent`, `reviewer.agent`)
+* Error span status & exception event recording
+* End-to-end request through `/run` with all state keys present
+
+Coverage report:
+
+```bash
+make coverage
+```
+
+Formatting & lint:
+
+```bash
+make fmt
+```
 
 ## PyProject Usage
 
-You can alternatively install using the modern PEP 621 metadata:
+You install everything from a single source (pyproject). For production/non-dev use:
 
 ```bash
-pip install -e .[dev]
+pip install .
+```
+
+To emit a pinned requirements snapshot (for environments that still expect a file):
+
+```bash
+make freeze   # writes requirements.lock.txt
 ```
 
 This makes the `src/` layout importable and adds pytest as a dev dependency. The test discovery is configured in `pyproject.toml` to only scan the single `test/` directory.
