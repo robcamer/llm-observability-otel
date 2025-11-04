@@ -8,7 +8,7 @@ Containerized multi-agent LangGraph sample instrumented with OpenTelemetry expor
 ├── src/
 │   └── agent/
 │       ├── app.py              # FastAPI service exposing /run and /health
-│       ├── agents.py           # Planner / Worker / Reviewer agents
+│       ├── agents.py           # Planner / Worker / Reflection / Reviewer agents
 │       ├── graph.py            # LangGraph workflow assembly
 │       ├── instrumentation.py  # OpenTelemetry + Azure Monitor exporter setup
 │       └── __init__.py
@@ -36,11 +36,11 @@ Containerized multi-agent LangGraph sample instrumented with OpenTelemetry expor
 * Optional in-memory span exporter for deterministic telemetry tests (`OTEL_INMEMORY_EXPORTER`).
 * Async API + agent workflow tests with coverage & Ruff lint/format (`make fmt`, `make coverage`).
 * Containerized FastAPI service (Dockerfile + docker-compose).
-* Terraform deployment for: Resource Group, Log Analytics Workspace, Application Insights, Container Apps Environment & Container App, Azure OpenAI (Cognitive) account.
+* Terraform deployment for: Resource Group, Log Analytics Workspace, Application Insights, Container Apps Environment & Container App, mandatory Azure OpenAI (Cognitive) account.
 
 ## Prerequisites
 
-* Python 3.11+
+* Python 3.10+
 * Docker / Docker Compose
 * Terraform >= 1.6.0
 * Azure CLI authenticated (`az login`)
@@ -70,15 +70,15 @@ Set one of the following environment variables before starting `uvicorn` or in `
 * `GITHUB_MODELS_API_KEY` with `GITHUB_MODELS_BASE_URL=https://models.github.ai/inference/` (GitHub Models endpoint)
 
 Otherwise the app returns stub responses.
-
+f
 ### Telemetry Export
 
 Provide `APPINSIGHTS_CONNECTION_STRING` (from Terraform output or existing resource) to enable Azure Monitor export. Without it spans stay local/no-op.
 
 ### .env & Terraform Variable Overrides
-### Azure OpenAI Usage
+### Azure OpenAI Usage (Mandatory)
 
-Terraform now provisions an Azure OpenAI (Cognitive Services) account. Deployment creation may require enabling the preview feature or manual portal deployment if the `azurerm_cognitive_deployment` resource is not supported in your provider version. The app automatically prefers Azure OpenAI when `AZURE_OPENAI_ENDPOINT` and `AZURE_OPENAI_DEPLOYMENT` are set (injected by Terraform into the Container App). For local use:
+Terraform provisions a mandatory Azure OpenAI (Cognitive Services) account. The application always uses the Azure endpoint and deployment injected into the Container App environment. If the `azurerm_cognitive_deployment` resource is unavailable in your provider version, ensure the model deployment already exists (Portal or CLI). For local development set these manually:
 
 ```bash
 export AZURE_OPENAI_ENDPOINT="https://<your-resource>.openai.azure.com"
@@ -106,6 +106,10 @@ curl -X POST http://localhost:8000/run -H 'Content-Type: application/json' -d '{
 
 Navigate to `infrastructure/` and deploy resources.
 
+### Local State (Default)
+
+Terraform uses local state by default (`terraform.tfstate` - gitignored):
+
 ```bash
 cd infrastructure
 terraform init
@@ -114,10 +118,32 @@ terraform plan -out tfplan
 terraform apply -auto-approve tfplan
 ```
 
+### Remote State (Recommended for Teams)
+
+For collaboration or CI/CD, configure Azure Storage backend:
+
+```bash
+# Option 1: Auto-create storage backend
+./setup-backend.sh
+
+# Option 2: Use existing storage
+cp backend.hcl.example backend.hcl
+# Edit backend.hcl with your storage details
+terraform init -backend-config=backend.hcl -reconfigure
+```
+
+The backend configuration provides:
+- State locking (prevents concurrent modifications)
+- Shared access for team members
+- State versioning and backup
+- Encryption at rest
+
 After apply, note outputs:
 
 * `container_app_url` – public FQDN to call `/run`.
-* `app_insights_connection_string` – feed into container app env var for telemetry export (already wired in `main.tf`).
+* `app_insights_connection_string` – telemetry ingestion (wired in `main.tf`).
+* `azure_openai_endpoint` – Azure OpenAI endpoint base URL.
+* `azure_openai_key` – Primary Azure OpenAI key (sensitive).
 
 ### Update Container Image
 
@@ -150,6 +176,20 @@ traces
 | `AZURE_OPENAI_API_VERSION` | API version query param appended |
 | `AZURE_OPENAI_API_KEY` | Key for Azure OpenAI account |
 | `OTEL_INMEMORY_EXPORTER` | When `1`/`true`, adds in-memory span exporter for tests |
+
+## Terraform Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `prefix` | `llmobs` | Name prefix for all resources |
+| `location` | `eastus` | Azure region |
+| `container_image` | `ghcr.io/your-org/llm-observability-otel:latest` | Deployed container image |
+| `resource_group_name` | (empty) | Existing RG name (if blank one is created) |
+| `azure_openai_sku_name` | `S0` | Azure OpenAI SKU tier |
+| `azure_openai_deployment_name` | `gpt-4o-mini` | Model deployment name referenced by the app |
+| `azure_openai_api_version` | `2024-08-01-preview` | API version used in requests |
+
+Override via `-var` flags or `TF_VAR_<name>` environment variables (e.g. `export TF_VAR_prefix=llmobsx`).
 
 ## Makefile Workflow
 

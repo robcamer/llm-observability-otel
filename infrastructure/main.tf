@@ -56,7 +56,6 @@ resource "azurerm_container_app" "app" {
   name                         = "${var.prefix}-app"
   container_app_environment_id = azurerm_container_app_environment.cae.id
   resource_group_name          = azurerm_resource_group.rg.name
-  location                     = var.location
 
   revision_mode = "Single"
 
@@ -66,7 +65,7 @@ resource "azurerm_container_app" "app" {
       image  = var.container_image
       cpu    = 0.5
       memory = "1Gi"
-      # Secrets referencing App Insights + Azure OpenAI key
+      # Basic telemetry env vars
       env {
         name  = "SERVICE_NAME"
         value = "langgraph-multi-agent"
@@ -79,9 +78,14 @@ resource "azurerm_container_app" "app" {
         name  = "APPINSIGHTS_CONNECTION_STRING"
         value = azurerm_application_insights.appinsights.connection_string
       }
+      # Mandatory Azure OpenAI configuration
       env {
         name  = "AZURE_OPENAI_ENDPOINT"
         value = azurerm_cognitive_account.aoai.endpoint
+      }
+      env {
+        name  = "AZURE_OPENAI_API_KEY"
+        value = azurerm_cognitive_account.aoai.primary_access_key
       }
       env {
         name  = "AZURE_OPENAI_DEPLOYMENT"
@@ -89,23 +93,18 @@ resource "azurerm_container_app" "app" {
       }
       env {
         name  = "AZURE_OPENAI_API_VERSION"
-        value = "2024-08-01-preview"
+        value = var.azure_openai_api_version
       }
-      # Inject primary key as secret
-      env {
-        name  = "AZURE_OPENAI_API_KEY"
-        value = azurerm_cognitive_account.aoai.primary_access_key
-      }
-    }
-    scale {
-      min_replicas = 1
-      max_replicas = 2
     }
   }
 
   ingress {
     external_enabled = true
     target_port      = 8000
+    traffic_weight {
+      latest_revision = true
+      percentage      = 100
+    }
   }
 
   tags = {
