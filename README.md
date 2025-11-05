@@ -165,15 +165,78 @@ Push your built image (e.g., to GHCR) and update `var.container_image` via `-var
 
 ### Observability Verification
 
-1. Invoke endpoint several times.
-2. In Azure Portal open Application Insights → Transactions / Traces to view spans (`planner.agent`, `worker.agent`, `reflection.agent`, `reviewer.agent`).
-3. Use Log Analytics with query:
+After running requests locally or from the deployed Container App, view telemetry in Azure Application Insights.
 
-```kusto
-traces
-| where customDimensions.service_name == "langgraph-multi-agent"
-| take 20
+#### Viewing Telemetry in Azure Portal
+
+**1. Open Application Insights**
+
+Navigate to your Application Insights resource:
+- **Azure Portal** → **Resource Groups** → **llmobs-rg** → **llmobs-ai** (Application Insights)
+
+Or open directly from command line:
+```bash
+az portal open --resource-group llmobs-rg --resource-name llmobs-ai --resource-type Microsoft.Insights/components
 ```
+
+**2. Explore Your Telemetry Data**
+
+Once in Application Insights, use these views:
+
+**Transaction Search** (fastest way to see traces)
+- Left menu: **Investigate → Transaction search**
+- View all traces, dependencies, and requests
+- Filter by time range (last 30 minutes, 1 hour, etc.)
+- Look for your requests with custom spans: `planner.agent`, `worker.agent`, `reflection.agent`, `reviewer.agent`
+
+**Logs** (for detailed KQL queries)
+- Left menu: **Monitoring → Logs**
+- View traces from your application:
+  ```kusto
+  traces
+  | where timestamp > ago(1h)
+  | where cloud_RoleName == "langgraph-multi-agent"
+  | project timestamp, message, severityLevel, customDimensions
+  | order by timestamp desc
+  | take 50
+  ```
+
+- View dependencies (agent LLM calls):
+  ```kusto
+  dependencies
+  | where timestamp > ago(1h)
+  | where cloud_RoleName == "langgraph-multi-agent"
+  | project timestamp, name, target, duration, customDimensions
+  | order by timestamp desc
+  ```
+
+- View full request flow:
+  ```kusto
+  requests
+  | where timestamp > ago(1h)
+  | where cloud_RoleName == "langgraph-multi-agent"
+  | project timestamp, name, url, duration, resultCode
+  | order by timestamp desc
+  ```
+
+**Performance**
+- Left menu: **Investigate → Performance**
+- See operation times and dependencies
+- View the call tree for each request
+
+**Live Metrics**
+- Left menu: **Investigate → Live Metrics**
+- Run a new request and watch real-time telemetry flow in
+- Useful for debugging and monitoring active sessions
+
+**3. Test Telemetry Flow**
+
+Run a test request:
+```bash
+curl -X POST http://localhost:8000/run -H 'Content-Type: application/json' -d '{"task": "Check telemetry visibility"}'
+```
+
+Telemetry appears in Application Insights within 1-2 minutes. Refresh Transaction Search or Logs to see your traces.
 
 ## Environment Variables Summary
 
