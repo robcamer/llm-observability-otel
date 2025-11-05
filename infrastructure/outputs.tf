@@ -10,12 +10,29 @@ output "app_insights_connection_string" {
 }
 
 output "azure_openai_endpoint" {
-	value       = azurerm_cognitive_account.aoai.endpoint
-	description = "Azure OpenAI endpoint URL"
+  value       = azurerm_cognitive_account.aoai.endpoint
+  description = "Azure OpenAI endpoint URL"
 }
 
 output "azure_openai_key" {
-	value       = azurerm_cognitive_account.aoai.primary_access_key
-	sensitive   = true
-	description = "Primary access key for Azure OpenAI account"
+  value       = azurerm_cognitive_account.aoai.primary_access_key
+  sensitive   = true
+  description = "Primary access key for Azure OpenAI account"
+}
+
+output "acr_login_server" {
+  value       = azurerm_container_registry.acr.login_server
+  description = "ACR login server URL"
+}
+
+output "acr_admin_username" {
+  value       = azurerm_container_registry.acr.admin_username
+  description = "ACR admin username"
+  sensitive   = true
+}
+
+output "acr_admin_password" {
+  value       = azurerm_container_registry.acr.admin_password
+  description = "ACR admin password"
+  sensitive   = true
 }

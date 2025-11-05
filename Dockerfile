@@ -11,11 +11,12 @@ WORKDIR /app
 # System deps
 RUN apt-get update && apt-get install -y build-essential curl && rm -rf /var/lib/apt/lists/*
 
-COPY pyproject.toml ./
-RUN pip install --upgrade pip && pip install .
-
+# Copy project files needed for installation
+COPY pyproject.toml README.md LICENSE ./
 COPY src ./src
-COPY README.md ./
+
+# Install dependencies
+RUN pip install --upgrade pip && pip install .
 
 EXPOSE 8000
 

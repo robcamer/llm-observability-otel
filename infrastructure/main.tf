@@ -7,6 +7,16 @@ resource "azurerm_resource_group" "rg" {
   location = var.location
 }
 
+# Azure Container Registry
+resource "azurerm_container_registry" "acr" {
+  name                = "${replace(var.prefix, "-", "")}acr"
+  resource_group_name = azurerm_resource_group.rg.name
+  location            = var.location
+  sku                 = "Basic"
+  admin_enabled       = true
+  tags = { application = "llm-observability" }
+}
+
 resource "azurerm_log_analytics_workspace" "law" {
   name                = "${var.prefix}-law"
   location            = var.location
@@ -59,10 +69,21 @@ resource "azurerm_container_app" "app" {
 
   revision_mode = "Single"
 
+  registry {
+    server               = azurerm_container_registry.acr.login_server
+    username             = azurerm_container_registry.acr.admin_username
+    password_secret_name = "acr-password"
+  }
+
+  secret {
+    name  = "acr-password"
+    value = azurerm_container_registry.acr.admin_password
+  }
+
   template {
     container {
       name   = "langgraph"
-      image  = var.container_image
+      image  = "${azurerm_container_registry.acr.login_server}/llm-observability-otel:latest"
       cpu    = 0.5
       memory = "1Gi"
       # Basic telemetry env vars
