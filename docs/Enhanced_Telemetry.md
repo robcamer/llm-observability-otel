@@ -1,18 +1,21 @@
 # Enhanced Telemetry Implementation Summary
 
 ## Overview
-Added comprehensive end-to-end OpenTelemetry instrumentation with LLM-specific metrics for complete observability from HTTP request through agent execution to individual LLM API calls.
+
+Cmprehensive end-to-end OpenTelemetry instrumentation with LLM-specific metrics for complete observability from HTTP request through agent execution to individual LLM API calls.
 
 ## Changes Made
 
 ### 1. Dependencies Added (pyproject.toml)
+
 ```toml
 "opentelemetry-instrumentation-httpx==0.51b0"    # Auto-trace HTTP calls to LLM APIs
 "opentelemetry-instrumentation-requests==0.51b0" # Auto-trace requests library calls
 ```
 
 ### 2. Enhanced Instrumentation (src/agent/instrumentation.py)
-**New capabilities:**
+
+**Capabilities:**
 - Auto-instrumentation of HTTPX and Requests libraries for LLM API calls
 - Enhanced `traced_span` decorator with duration tracking and content size metrics
 - New `add_llm_response_attributes()` function to capture token usage from OpenAI responses
@@ -24,7 +27,8 @@ Added comprehensive end-to-end OpenTelemetry instrumentation with LLM-specific m
 - LLM response metrics (see below)
 
 ### 3. LLM Call Tracing (src/agent/agents.py)
-**Complete rewrite of `_call_llm()` function:**
+
+**`_call_llm()` function:**
 - Creates detailed span for every LLM API call
 - Captures comprehensive metrics before and after call
 - Separate spans per agent: `llm.completion.planner`, `llm.completion.worker`, etc.
@@ -43,7 +47,8 @@ Added comprehensive end-to-end OpenTelemetry instrumentation with LLM-specific m
 - `llm.azure.api_version` - API version used
 
 ### 4. Workflow Orchestration (src/agent/app.py)
-**Added parent span for complete workflow:**
+
+**Parent span for complete workflow:**
 - `workflow.execution` span wraps entire agent execution
 - Captures request and response metadata
 - Links all child spans (agents + LLM calls)
@@ -58,18 +63,18 @@ Added comprehensive end-to-end OpenTelemetry instrumentation with LLM-specific m
 
 ### 5. Documentation
 
-**README.md enhancements:**
-- Updated Features section with LLM observability highlights
-- Added detailed OpenTelemetry instrumentation architecture
-- Added comprehensive KQL query examples for:
+**README.md**
+- Features section with LLM observability highlights
+- Detailed OpenTelemetry instrumentation architecture
+- Comprehensive KQL query examples for:
   - Token usage by agent
   - Cost estimation
   - Performance percentiles
   - Error rate tracking
   - End-to-end latency breakdown
-- Added span hierarchy visualization
+- Span hierarchy visualization
 
-**New TELEMETRY.md guide:**
+**TELEMETRY.md guide:**
 - Complete instrumentation layer documentation
 - Detailed attribute reference tables
 - KQL query cookbook
@@ -77,8 +82,6 @@ Added comprehensive end-to-end OpenTelemetry instrumentation with LLM-specific m
 - Troubleshooting section
 - Best practices
 
-**New CHANGES_SUMMARY.md:**
-- This document for quick reference
 
 ## Telemetry Architecture
 
@@ -108,12 +111,14 @@ POST /run (FastAPI)
 
 ## Testing
 
-All code changes compile successfully:
+Code validation using py_compile:
+
 ```bash
 python -m py_compile src/agent/instrumentation.py src/agent/agents.py src/agent/app.py
 ```
 
-To test locally with enhanced telemetry:
+To test locally with enhanced telemetry, run debugger or execute via uvicorn from Terminal:
+
 ```bash
 # Start debug mode or run directly
 uvicorn src.agent.app:app --reload
@@ -121,23 +126,23 @@ uvicorn src.agent.app:app --reload
 # Make a request
 curl -X POST http://localhost:8000/run \
   -H 'Content-Type: application/json' \
-  -d '{"task": "Test enhanced telemetry"}'
+  -d '{"task": "Plan an RV road trip from Seattle to Jacksonville.  Visit at least 4 national parks.  Trip duration 4 weeks."}'
 
 # View in Application Insights after 1-2 minutes
 ```
 
 ## Key Benefits
 
-1. **Complete Visibility**: Every HTTP request traced from entry to exit
+1. **Visibility**: Every HTTP request traced from entry to exit
 2. **Token Tracking**: Know exactly how many tokens each agent uses
 3. **Cost Analysis**: Calculate LLM costs per agent or per request
 4. **Performance Optimization**: Identify slow agents or LLM calls
 5. **Error Detection**: Automatic exception tracking with context
 6. **Business Metrics**: Custom attributes for domain-specific analysis
 
-## Next Steps to Use
+## Steps
 
-1. **Restart your debug session** to load the new code
+1. **Start debug session** to load the new code
 2. **Make test requests** to generate telemetry
 3. **Open Application Insights** and navigate to:
    - Transaction Search - see complete traces
@@ -150,6 +155,7 @@ curl -X POST http://localhost:8000/run \
 ## KQL Quick Start
 
 View LLM token usage by agent:
+
 ```kusto
 dependencies
 | where timestamp > ago(1h)
@@ -166,22 +172,5 @@ by agent
 | order by total_tokens desc
 ```
 
-See TELEMETRY.md for 10+ more query examples!
+See [Telemetry.md](./Telemetry.md) for  more query examples.
 
-## Compatibility
-
-- ✅ Backward compatible - existing tests still pass
-- ✅ No breaking changes to API
-- ✅ Graceful degradation if instrumentation fails
-- ✅ Works with in-memory exporter for testing
-- ✅ Azure Monitor export unchanged
-
-## Files Modified
-
-- `pyproject.toml` - Added 2 new dependencies
-- `src/agent/instrumentation.py` - Enhanced tracing functions
-- `src/agent/agents.py` - Detailed LLM call instrumentation
-- `src/agent/app.py` - Workflow orchestration span
-- `README.md` - Updated features, architecture, KQL queries
-- `TELEMETRY.md` - **NEW** comprehensive telemetry guide
-- `CHANGES_SUMMARY.md` - **NEW** this summary document

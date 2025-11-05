@@ -10,7 +10,7 @@ Containerized multi-agent LangGraph sample instrumented with OpenTelemetry expor
 - 🔗 **Automatic correlation** of all spans in a request via operation_Id
 - 📈 **Rich KQL queries** for cost analysis, performance optimization, and error tracking
 
-See **[TELEMETRY.md](TELEMETRY.md)** for comprehensive instrumentation details and KQL query examples.
+See **[Telemetry.md](docs/Telemetry.md)** for instrumentation details and KQL query examples.
 
 ## Project Structure
 

@@ -1,6 +1,11 @@
 # End-to-End Telemetry Guide
 
-This document describes the comprehensive OpenTelemetry instrumentation in this LLM observability demo.
+This document describes the comprehensive OpenTelemetry instrumentation in this LLM observability demo:
+
+- See [Enhanced Telemetry](./Enhanced_Telemetry.md) for additional implementation details.
+- See [Telemetry Tutorial](telemetry-tutorial-app-insights.md) for steps to review telemetry in App Insights.
+
+NOTE: Queries require modification for Log Analytics, which places AppInsights telemetry into different tables.
 
 ## Telemetry Architecture
 
