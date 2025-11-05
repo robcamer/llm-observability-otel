@@ -64,13 +64,18 @@ def _init_tracer() -> None:
     provider = TracerProvider(resource=resource)
 
     if connection_string:
-        exporter = AzureMonitorTraceExporter.from_connection_string(connection_string)
-        provider.add_span_processor(BatchSpanProcessor(exporter))
+        try:
+            exporter = AzureMonitorTraceExporter.from_connection_string(connection_string)
+            provider.add_span_processor(BatchSpanProcessor(exporter))
+        except (ValueError, Exception) as e:
+            # Invalid connection string or exporter initialization failed
+            # Continue without Azure Monitor - useful for testing
+            print(f"Warning: Failed to initialize Azure Monitor exporter: {e}")
     if enable_in_memory:
         provider.add_span_processor(SimpleSpanProcessor(_InMemoryExporter()))
 
-    if connection_string or enable_in_memory:
-        trace.set_tracer_provider(provider)
+    # Always set tracer provider, even if no exporters configured (for testing)
+    trace.set_tracer_provider(provider)
     
     # Auto-instrument HTTP clients for outbound LLM API calls
     try:
