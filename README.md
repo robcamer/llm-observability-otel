@@ -2,6 +2,16 @@
 
 Containerized multi-agent LangGraph sample instrumented with OpenTelemetry exporting traces to Azure Monitor / Application Insights and leveraging a Log Analytics workspace for deeper analysis.
 
+**Key Capabilities:**
+- 🔍 **End-to-end tracing** from HTTP request through agent execution to LLM API calls
+- 📊 **Token usage metrics** captured for every LLM call (prompt tokens, completion tokens, total cost)
+- ⚡ **Performance monitoring** with latency tracking at HTTP, workflow, agent, and LLM layers
+- 🎯 **Custom span attributes** for business metrics (task type, state size, response quality)
+- 🔗 **Automatic correlation** of all spans in a request via operation_Id
+- 📈 **Rich KQL queries** for cost analysis, performance optimization, and error tracking
+
+See **[TELEMETRY.md](TELEMETRY.md)** for comprehensive instrumentation details and KQL query examples.
+
 ## Project Structure
 
 ```
@@ -30,13 +40,16 @@ Containerized multi-agent LangGraph sample instrumented with OpenTelemetry expor
 
 ## Features
 
-* Multi-agent workflow (planner → worker → reflection → reviewer) using LangGraph.
-* OpenTelemetry tracing with custom spans per agent.
-* Azure Monitor / Application Insights exporter via connection string.
-* Optional in-memory span exporter for deterministic telemetry tests (`OTEL_INMEMORY_EXPORTER`).
-* Async API + agent workflow tests with coverage & Ruff lint/format (`make fmt`, `make coverage`).
-* Containerized FastAPI service (Dockerfile + docker-compose).
-* Terraform deployment for: Resource Group, Log Analytics Workspace, Application Insights, Container Apps Environment & Container App, mandatory Azure OpenAI (Cognitive) account.
+* **Multi-agent workflow** (planner → worker → reflection → reviewer) using LangGraph.
+* **Comprehensive OpenTelemetry tracing** with custom spans per agent and LLM call.
+* **Detailed LLM observability**: Token usage, latency, prompt/response metrics for every LLM call.
+* **End-to-end tracing**: HTTP request → agent execution → LLM calls → response with full span hierarchy.
+* **Auto-instrumentation**: FastAPI, HTTPX, and Requests automatically traced.
+* **Azure Monitor / Application Insights** exporter via connection string.
+* **Optional in-memory span exporter** for deterministic telemetry tests (`OTEL_INMEMORY_EXPORTER`).
+* **Async API + agent workflow tests** with coverage & Ruff lint/format (`make fmt`, `make coverage`).
+* **Containerized FastAPI service** (Dockerfile + docker-compose).
+* **Terraform deployment** for: Resource Group, Log Analytics Workspace, Application Insights, Container Apps Environment & Container App, mandatory Azure OpenAI (Cognitive) account with model deployment.
 
 ## Prerequisites
 
@@ -88,6 +101,66 @@ Otherwise the app returns stub responses.
 ### Telemetry Export
 
 Provide `APPINSIGHTS_CONNECTION_STRING` (from Terraform output or existing resource) to enable Azure Monitor export. Without it spans stay local/no-op.
+
+#### OpenTelemetry Instrumentation Details
+
+The application provides comprehensive end-to-end observability with multiple instrumentation layers:
+
+**1. HTTP Layer (Auto-instrumented)**
+- FastAPI requests automatically create parent spans
+- HTTPX and Requests libraries trace outbound HTTP calls to LLM APIs
+- Each HTTP request gets a unique `operation_Id` for correlation
+
+**2. Workflow Layer (Custom spans)**
+- `workflow.execution` - Parent span for entire agent workflow
+- Captures task metadata, result lengths, and completion status
+- Links all agent and LLM spans under a single operation
+
+**3. Agent Layer (Custom spans)**
+- `planner.agent` - Planning phase with task breakdown
+- `worker.agent` - Execution phase
+- `reflection.agent` - Quality validation phase
+- `reviewer.agent` - Final review and summary
+- Each agent span includes state keys, content size, and duration
+
+**4. LLM Call Layer (Detailed tracing)**
+- `llm.completion.planner` - LLM calls from planner agent
+- `llm.completion.worker` - LLM calls from worker agent
+- `llm.completion.reflection` - LLM calls from reflection agent
+- `llm.completion.reviewer` - LLM calls from reviewer agent
+
+**LLM Span Attributes Captured:**
+- `llm.system` - Provider (azure_openai, openai)
+- `llm.model` - Model name (gpt-4o-mini, etc.)
+- `llm.request.max_tokens` - Token limit
+- `llm.request.prompt_length` - Character count
+- `llm.usage.prompt_tokens` - Actual prompt tokens used
+- `llm.usage.completion_tokens` - Tokens in response
+- `llm.usage.total_tokens` - Total token consumption
+- `llm.response.length` - Response character count
+- `llm.response.finish_reason` - Completion status (stop, length, etc.)
+- `llm.azure.endpoint` - Azure OpenAI endpoint (when applicable)
+- `llm.azure.api_version` - API version used
+
+**Span Hierarchy Example:**
+```
+HTTP POST /run (FastAPI auto-instrumentation)
+└── workflow.execution
+    ├── planner.agent
+    │   └── llm.completion.planner (with token metrics)
+    │       └── HTTP POST to Azure OpenAI API (httpx auto-instrumentation)
+    ├── worker.agent
+    │   └── llm.completion.worker (with token metrics)
+    │       └── HTTP POST to Azure OpenAI API
+    ├── reflection.agent
+    │   └── llm.completion.reflection (with token metrics)
+    │       └── HTTP POST to Azure OpenAI API
+    └── reviewer.agent
+        └── llm.completion.reviewer (with token metrics)
+            └── HTTP POST to Azure OpenAI API
+```
+
+This architecture ensures complete visibility from HTTP request to individual LLM token usage.
 
 ### .env & Terraform Variable Overrides
 ### Azure OpenAI Usage (Mandatory)
@@ -191,7 +264,8 @@ Once in Application Insights, use these views:
 
 **Logs** (for detailed KQL queries)
 - Left menu: **Monitoring → Logs**
-- View traces from your application:
+
+**View end-to-end request traces:**
   ```kusto
   traces
   | where timestamp > ago(1h)
@@ -201,21 +275,74 @@ Once in Application Insights, use these views:
   | take 50
   ```
 
-- View dependencies (agent LLM calls):
+**View LLM call metrics with token usage:**
   ```kusto
   dependencies
   | where timestamp > ago(1h)
   | where cloud_RoleName == "langgraph-multi-agent"
-  | project timestamp, name, target, duration, customDimensions
+  | where name startswith "llm.completion"
+  | extend 
+      model = tostring(customDimensions["llm.model"]),
+      prompt_tokens = toint(customDimensions["llm.usage.prompt_tokens"]),
+      completion_tokens = toint(customDimensions["llm.usage.completion_tokens"]),
+      total_tokens = toint(customDimensions["llm.usage.total_tokens"]),
+      response_length = toint(customDimensions["llm.response.length"])
+  | project timestamp, name, model, duration, prompt_tokens, completion_tokens, total_tokens, response_length
   | order by timestamp desc
   ```
 
-- View full request flow:
+**Analyze token usage by agent:**
+  ```kusto
+  dependencies
+  | where timestamp > ago(24h)
+  | where cloud_RoleName == "langgraph-multi-agent"
+  | where name startswith "llm.completion"
+  | extend 
+      agent = tostring(split(name, ".")[2]),
+      total_tokens = toint(customDimensions["llm.usage.total_tokens"])
+  | summarize 
+      total_calls = count(),
+      avg_tokens = avg(total_tokens),
+      total_tokens = sum(total_tokens),
+      avg_duration_ms = avg(duration)
+  by agent
+  | order by total_tokens desc
+  ```
+
+**View complete workflow execution with all spans:**
+  ```kusto
+  union traces, dependencies, requests
+  | where timestamp > ago(1h)
+  | where cloud_RoleName == "langgraph-multi-agent"
+  | project timestamp, itemType, name, operation_Id, duration, customDimensions
+  | order by timestamp desc, operation_Id
+  ```
+
+**Track LLM performance and errors:**
+  ```kusto
+  dependencies
+  | where timestamp > ago(1h)
+  | where cloud_RoleName == "langgraph-multi-agent"
+  | where name startswith "llm.completion"
+  | extend 
+      agent = tostring(split(name, ".")[2]),
+      model = tostring(customDimensions["llm.model"]),
+      success = resultCode == "0" or success == true
+  | summarize 
+      total_calls = count(),
+      success_rate = countif(success) * 100.0 / count(),
+      avg_duration_ms = avg(duration),
+      p95_duration_ms = percentile(duration, 95)
+  by agent, model
+  | order by total_calls desc
+  ```
+
+**Full HTTP request flow:**
   ```kusto
   requests
   | where timestamp > ago(1h)
   | where cloud_RoleName == "langgraph-multi-agent"
-  | project timestamp, name, url, duration, resultCode
+  | project timestamp, name, url, duration, resultCode, operation_Id
   | order by timestamp desc
   ```
 

@@ -26,6 +26,8 @@ dependencies = [
   "opentelemetry-semantic-conventions==0.51b0",
   "opentelemetry-instrumentation-fastapi==0.51b0",
   "opentelemetry-instrumentation-asgi==0.51b0",
+  "opentelemetry-instrumentation-httpx==0.51b0",
+  "opentelemetry-instrumentation-requests==0.51b0",
   "azure-monitor-opentelemetry-exporter==1.0.0b25",
   "azure-identity==1.18.0"
 ]
