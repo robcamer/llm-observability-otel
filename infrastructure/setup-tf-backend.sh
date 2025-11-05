@@ -1,5 +1,5 @@
 #!/bin/bash
-# setup-backend.sh - Creates Azure Storage backend for Terraform state
+# setup-tf-backend.sh - Creates Azure Storage backend for Terraform state
 
 set -e
 

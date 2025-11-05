@@ -211,7 +211,7 @@ For collaboration or CI/CD, configure Azure Storage backend:
 
 ```bash
 # Option 1: Auto-create storage backend
-./setup-backend.sh
+./setup-tf-backend.sh
 
 # Option 2: Use existing storage
 cp backend.hcl.example backend.hcl
