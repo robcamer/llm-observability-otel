@@ -62,6 +62,20 @@ Visit: http://localhost:8000/health then POST a task:
 curl -X POST http://localhost:8000/run -H 'Content-Type: application/json' -d '{"task": "Outline observability advantages"}' | jq
 ```
 
+### VS Code Debugging
+
+The repo includes a pre-configured debug configuration (`.vscode/launch.json`):
+
+1. **Set up environment**: Copy `.env.example` to `.env` and populate with Azure OpenAI credentials from Terraform outputs
+2. **Set breakpoints**: Click in the gutter next to line numbers in Python files
+3. **Start debugging**: Press `F5` or select "Python Debugger: FastAPI" from Run and Debug panel
+4. **Test the endpoint**:
+   ```bash
+   curl -X POST http://localhost:8000/run -H 'Content-Type: application/json' -d '{"task": "Test local debug"}''
+   ```
+
+Environment variables are automatically loaded from `.env`.
+
 ### Enabling Real LLM Calls
 
 Set one of the following environment variables before starting `uvicorn` or in `docker-compose.yml`:
@@ -70,7 +84,7 @@ Set one of the following environment variables before starting `uvicorn` or in `
 * `GITHUB_MODELS_API_KEY` with `GITHUB_MODELS_BASE_URL=https://models.github.ai/inference/` (GitHub Models endpoint)
 
 Otherwise the app returns stub responses.
-f
+
 ### Telemetry Export
 
 Provide `APPINSIGHTS_CONNECTION_STRING` (from Terraform output or existing resource) to enable Azure Monitor export. Without it spans stay local/no-op.

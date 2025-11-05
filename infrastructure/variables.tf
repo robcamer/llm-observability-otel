@@ -28,6 +28,18 @@ variable "azure_openai_deployment_name" {
 	description = "Azure OpenAI model deployment name used by the app"
 }
 
+variable "azure_openai_model_name" {
+	type        = string
+	default     = "gpt-4o-mini"
+	description = "Azure OpenAI base model name (e.g., gpt-4o-mini, gpt-4o, gpt-35-turbo)"
+}
+
+variable "azure_openai_model_version" {
+	type        = string
+	default     = "2024-07-18"
+	description = "Azure OpenAI model version"
+}
+
 variable "azure_openai_api_version" {
 	type        = string
 	default     = "2024-08-01-preview"

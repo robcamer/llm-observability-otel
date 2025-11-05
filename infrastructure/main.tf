@@ -51,16 +51,22 @@ resource "azurerm_cognitive_account" "aoai" {
   tags = { application = "llm-observability" }
 }
 
-# (Optional) Deployment resource: some provider versions expose azurerm_cognitive_deployment for models.
-# Guard with 'count' if the resource type is available; fallback is manual deployment.
-# Uncomment if your provider version supports it.
-# resource "azurerm_cognitive_deployment" "aoai_model" {
-#   name                 = var.azure_openai_deployment_name
-#   cognitive_account_id = azurerm_cognitive_account.aoai.id
-#   model_format         = "OpenAI"
-#   model_name           = var.azure_openai_deployment_model
-#   scale_settings { scale_type = "Standard" }
-# }
+# Azure OpenAI Model Deployment
+resource "azurerm_cognitive_deployment" "aoai_model" {
+  name                 = var.azure_openai_deployment_name
+  cognitive_account_id = azurerm_cognitive_account.aoai.id
+  
+  model {
+    format  = "OpenAI"
+    name    = var.azure_openai_model_name
+    version = var.azure_openai_model_version
+  }
+  
+  scale {
+    type     = "Standard"
+    capacity = 10
+  }
+}
 
 resource "azurerm_container_app" "app" {
   name                         = "${var.prefix}-app"

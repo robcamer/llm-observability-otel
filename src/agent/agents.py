@@ -17,19 +17,24 @@ def _call_llm(prompt: str) -> str:
     if not api_key:
         return f"[stub-response] {prompt[:80]}..."
     try:
-        from openai import OpenAI  # type: ignore
-
         if azure_endpoint and azure_deployment:
-            # Construct base URL for deployment-specific path
-            base_url = f"{azure_endpoint}/openai/deployments/{azure_deployment}"
-            client = OpenAI(api_key=api_key, base_url=base_url)
+            # Use AzureOpenAI client for Azure endpoints
+            from openai import AzureOpenAI  # type: ignore
+
+            client = AzureOpenAI(
+                api_key=azure_key,
+                azure_endpoint=azure_endpoint,
+                api_version=azure_api_version,
+            )
             completion = client.chat.completions.create(
                 model=azure_deployment,
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=256,
-                extra_query_params={"api-version": azure_api_version},
             )
         else:
+            # Use standard OpenAI client for OpenAI or GitHub Models
+            from openai import OpenAI  # type: ignore
+
             base_url = os.getenv("OPENAI_BASE_URL") or os.getenv("GITHUB_MODELS_BASE_URL")
             client = (
                 OpenAI(api_key=api_key, base_url=base_url) if base_url else OpenAI(api_key=api_key)
