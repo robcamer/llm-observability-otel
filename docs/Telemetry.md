@@ -1,11 +1,13 @@
 # End-to-End Telemetry Guide
 
-This document describes the comprehensive OpenTelemetry instrumentation in this LLM observability demo:
+This document describes the comprehensive OpenTelemetry instrumentation in this LLM observability demo.
 
-- See [Enhanced Telemetry](./Enhanced_Telemetry.md) for additional implementation details.
-- See [Telemetry Tutorial](telemetry-tutorial-app-insights.md) for steps to review telemetry in App Insights.
+## Related Documentation
 
-NOTE: Queries require modification for Log Analytics, which places AppInsights telemetry into different tables.
+- [Enhanced Telemetry](./Enhanced_Telemetry.md) - Implementation details and architecture
+- [Telemetry Tutorial](telemetry-tutorial-app-insights.md) - Step-by-step guide to viewing telemetry in Application Insights
+
+**Note:** Log Analytics queries use different table names (AppRequests, AppDependencies) than Application Insights (requests, dependencies).
 
 ## Telemetry Architecture
 
@@ -40,22 +42,18 @@ Each LLM call creates a detailed span with rich attributes:
 
 ### LLM Call Attributes
 
-Every LLM API call captures:
+The application uses OpenTelemetry Gen AI semantic conventions for standardized LLM observability. Every LLM API call captures:
 
 | Attribute | Description | Example |
 |-----------|-------------|---------|
-| `llm.system` | Provider type | `azure_openai`, `openai` |
-| `llm.model` | Model identifier | `gpt-4o-mini` |
-| `llm.request.max_tokens` | Token limit requested | `256` |
-| `llm.request.prompt_length` | Input character count | `150` |
-| `llm.usage.prompt_tokens` | Actual prompt tokens | `45` |
-| `llm.usage.completion_tokens` | Response tokens | `128` |
-| `llm.usage.total_tokens` | Total tokens consumed | `173` |
-| `llm.response.length` | Response character count | `512` |
-| `llm.response.finish_reason` | Why completion stopped | `stop`, `length` |
-| `llm.response.model` | Actual model used | `gpt-4o-mini-2024-07-18` |
-| `llm.azure.endpoint` | Azure OpenAI endpoint | `https://xxx.openai.azure.com/` |
-| `llm.azure.api_version` | API version | `2024-08-01-preview` |
+| `gen_ai.system` | Provider type | `azure_openai`, `openai` |
+| `gen_ai.request.model` | Model identifier | `gpt-4o-mini` |
+| `gen_ai.request.max_tokens` | Token limit requested | `256` |
+| `gen_ai.operation.name` | Operation identifier | `llm.completion.planner` |
+| `gen_ai.usage.input_tokens` | Actual prompt tokens | `45` |
+| `gen_ai.usage.output_tokens` | Response tokens | `128` |
+| `gen_ai.response.model` | Actual model used | `gpt-4o-mini-2024-07-18` |
+| `gen_ai.response.finish_reasons` | Why completion stopped (array) | `["stop"]`, `["length"]` |
 
 ### Agent Attributes
 
@@ -92,7 +90,7 @@ POST /run                                    [FastAPI auto-instrumentation]
     ├── planner.agent                        [Custom span]
     │   ├── attributes: state.keys, duration_ms
     │   └── llm.completion.planner           [Custom span with LLM metrics]
-    │       ├── attributes: llm.model, llm.usage.*, duration
+    │       ├── attributes: gen_ai.request.model, gen_ai.usage.*, gen_ai.operation.name, duration
     │       └── POST /openai/deployments/... [HTTPX auto-instrumentation]
     ├── worker.agent
     │   └── llm.completion.worker
@@ -107,6 +105,16 @@ POST /run                                    [FastAPI auto-instrumentation]
 
 ## KQL Queries for Analysis
 
+The KQL queries below are formatted for App Insights.  If querying in Log Analytics, this table shows the table name differences:
+
+| Log Analytics | App Insights |
+|---------------|--------------|
+| AppRequests |requests |
+| TimeGenerated |timestamp |
+| AppRoleName |cloud_RoleName |
+| DurationMs |duration |
+| Properties |customDimensions |
+
 ### Token Usage by Agent
 
 ```kusto
@@ -116,17 +124,18 @@ dependencies
 | where name startswith "llm.completion"
 | extend 
     agent = tostring(split(name, ".")[2]),
-    prompt_tokens = toint(customDimensions["llm.usage.prompt_tokens"]),
-    completion_tokens = toint(customDimensions["llm.usage.completion_tokens"]),
-    total_tokens = toint(customDimensions["llm.usage.total_tokens"])
+    input_tokens = toint(customDimensions["gen_ai.usage.input_tokens"]),
+    output_tokens = toint(customDimensions["gen_ai.usage.output_tokens"]),
+    model = tostring(customDimensions["gen_ai.request.model"])
 | summarize 
     total_calls = count(),
-    avg_prompt_tokens = avg(prompt_tokens),
-    avg_completion_tokens = avg(completion_tokens),
-    total_tokens_consumed = sum(total_tokens),
+    avg_input_tokens = avg(input_tokens),
+    avg_output_tokens = avg(output_tokens),
+    total_input_tokens = sum(input_tokens),
+    total_output_tokens = sum(output_tokens),
     avg_duration_ms = avg(duration)
-by agent
-| order by total_tokens_consumed desc
+by agent, model
+| order by total_input_tokens desc
 ```
 
 ### LLM Performance Percentiles
@@ -157,18 +166,18 @@ dependencies
 | where cloud_RoleName == "langgraph-multi-agent"
 | where name startswith "llm.completion"
 | extend 
-    prompt_tokens = toint(customDimensions["llm.usage.prompt_tokens"]),
-    completion_tokens = toint(customDimensions["llm.usage.completion_tokens"])
+    input_tokens = toint(customDimensions["gen_ai.usage.input_tokens"]),
+    output_tokens = toint(customDimensions["gen_ai.usage.output_tokens"]),
+    model = tostring(customDimensions["gen_ai.request.model"])
 | summarize 
-    total_prompt_tokens = sum(prompt_tokens),
-    total_completion_tokens = sum(completion_tokens),
+    total_input_tokens = sum(input_tokens),
+    total_output_tokens = sum(output_tokens),
     total_calls = count()
-| extend 
-    input_cost = total_prompt_tokens * 0.150 / 1000000.0,
-    output_cost = total_completion_tokens * 0.600 / 1000000.0,
-    total_cost = input_cost + output_cost
-| project total_calls, total_prompt_tokens, total_completion_tokens, 
-          input_cost, output_cost, total_cost
+by model
+| project model, total_calls, total_input_tokens, total_output_tokens,
+          input_cost = round(total_input_tokens * 0.150 / 1000000.0, 4), 
+          output_cost = round(total_output_tokens * 0.600 / 1000000.0, 4), 
+          total_cost = round((total_input_tokens * 0.150 / 1000000.0) + (total_output_tokens * 0.600 / 1000000.0), 4)
 ```
 
 ### Error Rate by Agent
@@ -206,26 +215,26 @@ union traces, dependencies, requests
 ## Viewing in Application Insights
 
 ### Transaction Search
-1. Navigate to **Application Insights → Transaction search**
+1. Navigate to **Application Insights |Transaction search**
 2. Filter by time range
 3. Look for `POST /run` requests
 4. Click any request to see the complete span hierarchy
 5. Expand each span to view attributes (token usage, durations, etc.)
 
 ### Application Map
-1. Navigate to **Application Insights → Application Map**
+1. Navigate to **Application Insights |Application Map**
 2. View service dependencies and call patterns
 3. See failure rates and average durations
 4. Identify bottlenecks in the agent workflow
 
 ### Performance Blade
-1. Navigate to **Application Insights → Performance**
+1. Navigate to **Application Insights |Performance**
 2. View operation times for each agent
 3. Analyze dependencies (LLM calls)
 4. Drill into specific operations for detailed traces
 
 ### Live Metrics
-1. Navigate to **Application Insights → Live Metrics**
+1. Navigate to **Application Insights |Live Metrics**
 2. Run a request: `curl -X POST http://localhost:8000/run -H 'Content-Type: application/json' -d '{"task": "Test"}'`
 3. Watch real-time telemetry flow
 4. See request rate, duration, dependencies as they happen
@@ -266,21 +275,116 @@ This captures spans in memory for validation without requiring Application Insig
 2. Check that `get_tracer()` is called before creating spans
 3. Verify spans are created within an active context
 
+## OpenTelemetry Metrics
+
+In addition to traces, the application exports OpenTelemetry metrics:
+
+### Token Usage Counter
+**Metric:** `gen_ai.client.token.usage` (Counter)
+
+Tracks token consumption in real-time.
+
+**Attributes:**
+- `gen_ai.token.type` - "input" or "output"
+- `gen_ai.request.model` - Model name
+- `gen_ai.operation.name` - Operation identifier
+
+**Query Example:**
+```kusto
+customMetrics
+| where name == "gen_ai.client.token.usage"
+| extend 
+    token_type = tostring(customDimensions["gen_ai.token.type"]),
+    model = tostring(customDimensions["gen_ai.request.model"])
+| summarize TotalTokens = sum(value) by token_type, model
+```
+
+### Operation Duration Histogram
+**Metric:** `gen_ai.client.operation.duration` (Histogram)
+
+Tracks LLM operation latency distribution.
+
+**Attributes:**
+- `gen_ai.request.model` - Model name
+- `gen_ai.operation.name` - Operation identifier
+
+**Query Example:**
+```kusto
+customMetrics
+| where name == "gen_ai.client.operation.duration"
+| extend 
+    model = tostring(customDimensions["gen_ai.request.model"]),
+    operation = tostring(customDimensions["gen_ai.operation.name"])
+| summarize 
+    avg_duration = avg(value),
+    p95_duration = percentile(value, 95)
+by model, operation
+```
+
+## Prompt & Response Logging
+
+The application supports optional prompt/response content logging via span events.
+
+### Configuration
+
+**Enable logging** (disabled by default for privacy):
+```bash
+export ENABLE_PROMPT_LOGGING=true
+```
+
+**Control truncation** (default: 1000 characters):
+```bash
+export PROMPT_LOG_MAX_LENGTH=2000
+```
+
+### Span Events
+
+When enabled, each LLM call logs two events:
+
+**Event:** `gen_ai.content.prompt`
+- `gen_ai.prompt` - The prompt text (truncated)
+- `gen_ai.prompt.length` - Full prompt length
+- `gen_ai.prompt.truncated` - Boolean
+
+**Event:** `gen_ai.content.completion`
+- `gen_ai.completion` - The completion text (truncated)
+- `gen_ai.completion.length` - Full completion length
+- `gen_ai.completion.truncated` - Boolean
+
+### Privacy Considerations
+
+- Disabled by default
+- Automatic truncation to prevent large data volumes
+- Stored as events (not indexed attributes)
+- Configurable per environment
+
 ## Best Practices
 
-1. **Always use correlation IDs**: The `operation_Id` links all spans in a request
-2. **Set semantic attributes**: Use standard OpenTelemetry semantic conventions
-3. **Capture errors**: Use `span.record_exception()` and set error status
-4. **Add business metrics**: Include domain-specific attributes (task type, user info)
-5. **Monitor token usage**: Track costs and optimize prompts based on metrics
-6. **Set up alerts**: Create Azure Monitor alerts for high latency or error rates
-7. **Use sampling for scale**: Configure sampling in production to manage costs
+1. **Use correlation IDs** - The `operation_Id` links all spans in a request
+2. **Follow semantic conventions** - Use OpenTelemetry Gen AI standards for LLM attributes
+3. **Capture errors** - Use `span.record_exception()` and set error status
+4. **Add business metrics** - Include domain-specific attributes (task type, user info)
+5. **Monitor token usage** - Track costs and optimize prompts based on metrics
+6. **Set up alerts** - Create Azure Monitor alerts for high latency, error rates, or token thresholds
+7. **Use sampling for scale** - Configure sampling in production to manage costs
+8. **Control prompt logging** - Only enable in dev/test environments due to privacy and data volume
+9. **Leverage metrics** - Use counters and histograms for real-time dashboards and alerting
+10. **Review periodically** - Analyze performance trends and optimize based on telemetry data
 
 ## Next Steps
 
-- Add metrics exporters for real-time dashboards
-- Implement distributed tracing across microservices
-- Add logging exporter for structured logs
-- Create custom Azure Monitor workbooks for LLM analytics
-- Set up alerting rules for token usage thresholds
-- Implement trace sampling strategies for high-volume scenarios
+- Create custom Azure Monitor workbooks for LLM analytics dashboards
+- Set up alerting rules for token usage thresholds and performance degradation
+- Implement trace sampling strategies for high-volume production scenarios
+- Add metrics exporters for real-time performance monitoring
+- Integrate distributed tracing across microservices
+- Configure logging exporter for structured log analysis
+- Explore OpenLLMetry integration for automatic instrumentation
+- Add RAG observability with `gen_ai.retrieval.*` attributes for vector database queries
+
+## Additional Resources
+
+- [OpenTelemetry Gen AI Semantic Conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/)
+- [Azure Monitor Documentation](https://docs.microsoft.com/azure/azure-monitor/)
+- [OpenTelemetry Metrics API](https://opentelemetry.io/docs/specs/otel/metrics/api/)
+- [KQL Language Reference](https://docs.microsoft.com/azure/data-explorer/kusto/query/)

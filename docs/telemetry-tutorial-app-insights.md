@@ -59,10 +59,10 @@ az portal open --resource-group llmobs-rg --resource-name llmobs-ai --resource-t
 6. **Inspect Span Details**
    - Click any span in the timeline
    - Right panel shows **Custom Properties**:
-     - `llm.usage.prompt_tokens` - Input tokens
-     - `llm.usage.completion_tokens` - Output tokens
-     - `llm.usage.total_tokens` - Total consumption
-     - `llm.model` - Model used
+     - `gen_ai.usage.input_tokens` - Input tokens
+     - `gen_ai.usage.output_tokens` - Output tokens
+     - `gen_ai.request.model` - Model used
+     - `gen_ai.operation.name` - Operation identifier
      - `workflow.task` - Original user input
      - Duration and timestamps
 
@@ -179,9 +179,13 @@ az portal open --resource-group llmobs-rg --resource-name llmobs-ai --resource-t
    | where Name startswith "llm.completion"
    | extend 
        Agent = tostring(split(Name, ".")[2]),
-       TotalTokens = toint(Properties["llm.usage.total_tokens"])
-   | summarize TotalTokens = sum(TotalTokens) by Agent
-   | order by TotalTokens desc
+       InputTokens = toint(Properties["gen_ai.usage.input_tokens"]),
+       OutputTokens = toint(Properties["gen_ai.usage.output_tokens"])
+   | summarize 
+       TotalInput = sum(InputTokens),
+       TotalOutput = sum(OutputTokens)
+   by Agent
+   | order by TotalInput desc
    ```
    - Click **Run Query**
    - Change visualization: **Chart Type → Pie chart** or **Bar chart**
@@ -214,17 +218,19 @@ az portal open --resource-group llmobs-rg --resource-name llmobs-ai --resource-t
    | where TimeGenerated > ago(24h)
    | where Name startswith "llm.completion"
    | extend 
-       PromptTokens = toint(Properties["llm.usage.prompt_tokens"]),
-       CompletionTokens = toint(Properties["llm.usage.completion_tokens"])
+       InputTokens = toint(Properties["gen_ai.usage.input_tokens"]),
+       OutputTokens = toint(Properties["gen_ai.usage.output_tokens"]),
+       Model = tostring(Properties["gen_ai.request.model"])
    | summarize 
-       TotalPromptTokens = sum(PromptTokens),
-       TotalCompletionTokens = sum(CompletionTokens),
+       TotalInputTokens = sum(InputTokens),
+       TotalOutputTokens = sum(OutputTokens),
        TotalCalls = count()
+   by Model
    | extend 
-       InputCost = TotalPromptTokens * 0.150 / 1000000.0,
-       OutputCost = TotalCompletionTokens * 0.600 / 1000000.0,
+       InputCost = TotalInputTokens * 0.150 / 1000000.0,
+       OutputCost = TotalOutputTokens * 0.600 / 1000000.0,
        TotalCost = InputCost + OutputCost
-   | project TotalCalls, TotalPromptTokens, TotalCompletionTokens, 
+   | project Model, TotalCalls, TotalInputTokens, TotalOutputTokens, 
              InputCost = round(InputCost, 4), 
              OutputCost = round(OutputCost, 4), 
              TotalCost = round(TotalCost, 4)
@@ -346,17 +352,15 @@ az portal open --resource-group llmobs-rg --resource-name llmobs-ai --resource-t
    | where Name startswith "llm.completion"
    | extend 
        Agent = tostring(split(Name, ".")[2]),
-       PromptTokens = toint(Properties["llm.usage.prompt_tokens"]),
-       CompletionTokens = toint(Properties["llm.usage.completion_tokens"]),
-       TotalTokens = toint(Properties["llm.usage.total_tokens"]),
-       Model = tostring(Properties["llm.model"])
+       InputTokens = toint(Properties["gen_ai.usage.input_tokens"]),
+       OutputTokens = toint(Properties["gen_ai.usage.output_tokens"]),
+       Model = tostring(Properties["gen_ai.request.model"])
    | project 
        TimeGenerated,
        Agent,
        DurationMs,
-       PromptTokens,
-       CompletionTokens,
-       TotalTokens,
+       InputTokens,
+       OutputTokens,
        Model
    | order by TimeGenerated asc
    ```

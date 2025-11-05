@@ -1,3 +1,10 @@
+import os
+
+# Disable real API calls for fast tests
+os.environ.pop("AZURE_OPENAI_API_KEY", None)
+os.environ.pop("OPENAI_API_KEY", None)
+os.environ.pop("GITHUB_MODELS_API_KEY", None)
+
 from src.agent.graph import build_graph
 
 

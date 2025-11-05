@@ -3,6 +3,7 @@
 Sets up tracing, metrics, and logs export to Azure Monitor (App Insights + Log Analytics).
 Requires environment variable APPINSIGHTS_CONNECTION_STRING.
 Provides comprehensive LLM call tracing with token usage and latency metrics.
+Implements OpenTelemetry Gen AI semantic conventions for standardized observability.
 """
 
 from __future__ import annotations
@@ -11,7 +12,7 @@ import time
 from functools import wraps
 from typing import Callable, Any, Dict
 
-from opentelemetry import trace
+from opentelemetry import trace, metrics
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import (
@@ -20,10 +21,15 @@ from opentelemetry.sdk.trace.export import (
     SpanExporter,
     SpanExportResult,
 )
-from azure.monitor.opentelemetry.exporter import AzureMonitorTraceExporter
+from opentelemetry.sdk.metrics import MeterProvider
+from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
+from azure.monitor.opentelemetry.exporter import AzureMonitorTraceExporter, AzureMonitorMetricExporter
 
 _tracer_initialized = False
 _in_memory_spans = []
+_meter = None
+_token_counter = None
+_operation_duration = None
 
 
 class _InMemoryExporter(SpanExporter):
@@ -49,7 +55,7 @@ def reset_in_memory_spans():  # pragma: no cover - test helper
 
 
 def _init_tracer() -> None:
-    global _tracer_initialized
+    global _tracer_initialized, _meter, _token_counter, _operation_duration
     if _tracer_initialized:
         return
     connection_string = os.getenv("APPINSIGHTS_CONNECTION_STRING")
@@ -61,21 +67,53 @@ def _init_tracer() -> None:
             "deployment.environment": os.getenv("DEPLOYMENT_ENV", "local"),
         }
     )
+    
+    # Initialize trace provider
     provider = TracerProvider(resource=resource)
 
     if connection_string:
         try:
-            exporter = AzureMonitorTraceExporter.from_connection_string(connection_string)
-            provider.add_span_processor(BatchSpanProcessor(exporter))
+            trace_exporter = AzureMonitorTraceExporter.from_connection_string(connection_string)
+            provider.add_span_processor(BatchSpanProcessor(trace_exporter))
         except (ValueError, Exception) as e:
             # Invalid connection string or exporter initialization failed
             # Continue without Azure Monitor - useful for testing
-            print(f"Warning: Failed to initialize Azure Monitor exporter: {e}")
+            print(f"Warning: Failed to initialize Azure Monitor trace exporter: {e}")
     if enable_in_memory:
         provider.add_span_processor(SimpleSpanProcessor(_InMemoryExporter()))
 
     # Always set tracer provider, even if no exporters configured (for testing)
     trace.set_tracer_provider(provider)
+    
+    # Initialize metrics provider
+    if connection_string:
+        try:
+            metric_exporter = AzureMonitorMetricExporter.from_connection_string(connection_string)
+            metric_reader = PeriodicExportingMetricReader(metric_exporter, export_interval_millis=60000)
+            meter_provider = MeterProvider(resource=resource, metric_readers=[metric_reader])
+            metrics.set_meter_provider(meter_provider)
+        except (ValueError, Exception) as e:
+            print(f"Warning: Failed to initialize Azure Monitor metric exporter: {e}")
+            # Fallback to default meter provider
+            meter_provider = MeterProvider(resource=resource)
+            metrics.set_meter_provider(meter_provider)
+    else:
+        # Use default meter provider for testing
+        meter_provider = MeterProvider(resource=resource)
+        metrics.set_meter_provider(meter_provider)
+    
+    # Create meters and instruments for LLM metrics
+    _meter = metrics.get_meter(__name__)
+    _token_counter = _meter.create_counter(
+        name="gen_ai.client.token.usage",
+        description="Number of tokens used in LLM operations",
+        unit="tokens"
+    )
+    _operation_duration = _meter.create_histogram(
+        name="gen_ai.client.operation.duration",
+        description="Duration of LLM operations",
+        unit="ms"
+    )
     
     # Auto-instrument HTTP clients for outbound LLM API calls
     try:
@@ -160,29 +198,110 @@ def trace_llm_call(model: str, prompt: str, max_tokens: int = 256):
     return span
 
 
-def add_llm_response_attributes(span: trace.Span, response: Any) -> None:
-    """Add LLM response attributes to an existing span.
+def add_llm_response_attributes(span: trace.Span, response: Any, model: str = "", operation: str = "") -> None:
+    """Add LLM response attributes to an existing span using Gen AI semantic conventions.
     
     Args:
         span: Active OpenTelemetry span
         response: OpenAI completion response object
+        model: Model name for metrics attribution
+        operation: Operation name for metrics attribution
     """
+    global _token_counter
+    
     try:
-        if hasattr(response, "usage"):
-            # Token usage metrics
-            if response.usage:
-                span.set_attribute("llm.usage.prompt_tokens", response.usage.prompt_tokens)
-                span.set_attribute("llm.usage.completion_tokens", response.usage.completion_tokens)
-                span.set_attribute("llm.usage.total_tokens", response.usage.total_tokens)
+        if hasattr(response, "usage") and response.usage:
+            # Gen AI semantic conventions for token usage
+            prompt_tokens = response.usage.prompt_tokens
+            completion_tokens = response.usage.completion_tokens
+            total_tokens = response.usage.total_tokens
+            
+            span.set_attribute("gen_ai.usage.input_tokens", prompt_tokens)
+            span.set_attribute("gen_ai.usage.output_tokens", completion_tokens)
+            
+            # Record metrics
+            if _token_counter and model:
+                _token_counter.add(
+                    prompt_tokens,
+                    {"gen_ai.token.type": "input", "gen_ai.request.model": model, "gen_ai.operation.name": operation}
+                )
+                _token_counter.add(
+                    completion_tokens,
+                    {"gen_ai.token.type": "output", "gen_ai.request.model": model, "gen_ai.operation.name": operation}
+                )
         
         if hasattr(response, "choices") and response.choices:
             choice = response.choices[0]
             if hasattr(choice, "message"):
                 content = choice.message.content or ""
-                span.set_attribute("llm.response.length", len(content))
-                span.set_attribute("llm.response.finish_reason", choice.finish_reason or "unknown")
+                span.set_attribute("gen_ai.response.finish_reasons", [choice.finish_reason or "unknown"])
         
         if hasattr(response, "model"):
-            span.set_attribute("llm.response.model", response.model)
+            span.set_attribute("gen_ai.response.model", response.model)
     except Exception:  # pragma: no cover
         pass  # Don't fail if response structure is unexpected
+
+
+def log_llm_prompt_and_response(
+    span: trace.Span,
+    prompt: str,
+    response: str,
+    enable_content_logging: bool = None
+) -> None:
+    """Log LLM prompt and response as span events.
+    
+    Args:
+        span: Active OpenTelemetry span
+        prompt: The prompt sent to the LLM
+        response: The response received from the LLM
+        enable_content_logging: Whether to log full content (default: from env ENABLE_PROMPT_LOGGING)
+    """
+    if enable_content_logging is None:
+        enable_content_logging = os.getenv("ENABLE_PROMPT_LOGGING", "false").lower() in {"true", "1", "yes"}
+    
+    if not enable_content_logging:
+        return
+    
+    try:
+        # Truncate content for privacy/size limits (max 1000 chars)
+        max_length = int(os.getenv("PROMPT_LOG_MAX_LENGTH", "1000"))
+        
+        span.add_event(
+            "gen_ai.content.prompt",
+            {
+                "gen_ai.prompt": prompt[:max_length],
+                "gen_ai.prompt.length": len(prompt),
+                "gen_ai.prompt.truncated": len(prompt) > max_length
+            }
+        )
+        
+        span.add_event(
+            "gen_ai.content.completion",
+            {
+                "gen_ai.completion": response[:max_length],
+                "gen_ai.completion.length": len(response),
+                "gen_ai.completion.truncated": len(response) > max_length
+            }
+        )
+    except Exception:  # pragma: no cover
+        pass  # Don't fail if event logging fails
+
+
+def record_llm_operation_duration(model: str, operation: str, duration_ms: float) -> None:
+    """Record LLM operation duration as a metric.
+    
+    Args:
+        model: Model name
+        operation: Operation name (e.g., 'llm.completion.planner')
+        duration_ms: Duration in milliseconds
+    """
+    global _operation_duration
+    
+    try:
+        if _operation_duration:
+            _operation_duration.record(
+                duration_ms,
+                {"gen_ai.request.model": model, "gen_ai.operation.name": operation}
+            )
+    except Exception:  # pragma: no cover
+        pass  # Don't fail if metric recording fails

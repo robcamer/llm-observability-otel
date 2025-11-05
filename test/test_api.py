@@ -2,8 +2,11 @@ import os
 import pytest
 from httpx import AsyncClient, ASGITransport
 
-# Enable in-memory exporter before importing app/instrumentation
+# Enable in-memory exporter and disable real API calls for fast tests
 os.environ["OTEL_INMEMORY_EXPORTER"] = "1"
+os.environ.pop("AZURE_OPENAI_API_KEY", None)
+os.environ.pop("OPENAI_API_KEY", None)
+os.environ.pop("GITHUB_MODELS_API_KEY", None)
 
 from src.agent.app import app  # noqa: E402
 from src.agent import instrumentation  # noqa: E402

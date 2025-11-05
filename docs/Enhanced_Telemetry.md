@@ -1,8 +1,8 @@
-# Enhanced Telemetry Implementation Summary
+# Enhanced Telemetry Implementation
 
 ## Overview
 
-Cmprehensive end-to-end OpenTelemetry instrumentation with LLM-specific metrics for complete observability from HTTP request through agent execution to individual LLM API calls.
+Comprehensive end-to-end OpenTelemetry instrumentation using Gen AI semantic conventions for standardized LLM observability. The implementation includes traces, metrics, and optional prompt/response logging from HTTP request through agent execution to individual LLM API calls.
 
 ## Changes Made
 
@@ -15,36 +15,38 @@ Cmprehensive end-to-end OpenTelemetry instrumentation with LLM-specific metrics 
 
 ### 2. Enhanced Instrumentation (src/agent/instrumentation.py)
 
-**Capabilities:**
-- Auto-instrumentation of HTTPX and Requests libraries for LLM API calls
+**Core capabilities:**
+- Auto-instrumentation of HTTPX and Requests libraries for LLM API call tracing
 - Enhanced `traced_span` decorator with duration tracking and content size metrics
-- New `add_llm_response_attributes()` function to capture token usage from OpenAI responses
-- Improved span status handling with OK/ERROR states
+- `add_llm_response_attributes()` function captures token usage using Gen AI semantic conventions
+- `log_llm_prompt_and_response()` function for optional prompt/response event logging
+- `record_llm_operation_duration()` function for metrics recording
+- Span status handling with OK/ERROR states
+- OpenTelemetry metrics provider initialization
 
-**Key attributes captured:**
+**Span attributes:**
 - `duration_ms` - Execution time for any span
 - `state.content_size` - Total character count in agent state
-- LLM response metrics (see below)
+- Gen AI semantic convention attributes (see below)
 
 ### 3. LLM Call Tracing (src/agent/agents.py)
 
-**`_call_llm()` function:**
-- Creates detailed span for every LLM API call
-- Captures comprehensive metrics before and after call
-- Separate spans per agent: `llm.completion.planner`, `llm.completion.worker`, etc.
+**Implementation:**
+- `_call_llm()` function creates detailed spans for every LLM API call
+- Captures comprehensive metrics before and after each call
+- Separate operation names per agent: `llm.completion.planner`, `llm.completion.worker`, `llm.completion.reflection`, `llm.completion.reviewer`
+- Duration tracking for performance analysis
+- Prompt and response logging when enabled
 
-**LLM attributes captured:**
-- `llm.system` - Provider (azure_openai, openai)
-- `llm.model` - Model name
-- `llm.request.max_tokens` - Token limit
-- `llm.request.prompt_length` - Input character count
-- `llm.usage.prompt_tokens` - Actual prompt tokens (from API response)
-- `llm.usage.completion_tokens` - Response tokens (from API response)
-- `llm.usage.total_tokens` - Total consumption (from API response)
-- `llm.response.length` - Response character count
-- `llm.response.finish_reason` - Completion status
-- `llm.azure.endpoint` - Azure OpenAI endpoint (when applicable)
-- `llm.azure.api_version` - API version used
+**LLM attributes (Gen AI semantic conventions):**
+- `gen_ai.system` - Provider (azure_openai, openai)
+- `gen_ai.request.model` - Model name/deployment
+- `gen_ai.request.max_tokens` - Token limit
+- `gen_ai.operation.name` - Operation identifier (e.g., llm.completion.planner)
+- `gen_ai.usage.input_tokens` - Actual prompt tokens (from API response)
+- `gen_ai.usage.output_tokens` - Response tokens (from API response)
+- `gen_ai.response.model` - Actual model that responded
+- `gen_ai.response.finish_reasons` - Completion status (array)
 
 ### 4. Workflow Orchestration (src/agent/app.py)
 
@@ -61,26 +63,73 @@ Cmprehensive end-to-end OpenTelemetry instrumentation with LLM-specific metrics 
 - `workflow.work_length` - Work output size
 - `workflow.review_length` - Review output size
 
-### 5. Documentation
+### 5. OpenTelemetry Metrics
 
-**README.md**
+**Metrics implementation:** Real-time metrics export to Azure Monitor
+
+**Metrics instruments:**
+- `gen_ai.client.token.usage` (Counter)
+  - Tracks token consumption by type (input/output), model, and operation
+  - Enables real-time cost monitoring and budgeting
+- `gen_ai.client.operation.duration` (Histogram)
+  - Measures LLM operation latency distribution
+  - Supports p95/p99 performance analysis
+
+**Benefits:**
+- Real-time dashboards
+- Proactive alerting on token usage or latency
+- Cost tracking without complex trace queries
+- Performance monitoring at scale
+
+### 6. Prompt & Response Logging
+
+**Feature:** Optional content logging via span events
+
+**Configuration:**
+```bash
+export ENABLE_PROMPT_LOGGING=true        # Default: false
+export PROMPT_LOG_MAX_LENGTH=1000        # Default: 1000
+```
+
+**Span events created:**
+- `gen_ai.content.prompt` - Captures prompt text (truncated)
+  - `gen_ai.prompt` - The prompt text
+  - `gen_ai.prompt.length` - Full prompt length
+  - `gen_ai.prompt.truncated` - Boolean
+- `gen_ai.content.completion` - Captures response text (truncated)
+  - `gen_ai.completion` - The completion text
+  - `gen_ai.completion.length` - Full completion length
+  - `gen_ai.completion.truncated` - Boolean
+
+**Use cases:**
+- Debugging LLM behavior
+- Quality assurance
+- Prompt optimization
+- Compliance auditing (when enabled)
+
+**Privacy controls:**
+- Disabled by default
+- Automatic truncation
+- Event-based (not indexed as attributes)
+- Configurable per environment
+
+### 7. Documentation
+
+**README.md:**
 - Features section with LLM observability highlights
 - Detailed OpenTelemetry instrumentation architecture
-- Comprehensive KQL query examples for:
-  - Token usage by agent
-  - Cost estimation
-  - Performance percentiles
-  - Error rate tracking
-  - End-to-end latency breakdown
+- Comprehensive KQL query examples using Gen AI conventions
 - Span hierarchy visualization
 
-**TELEMETRY.md guide:**
+**Telemetry.md:**
 - Complete instrumentation layer documentation
-- Detailed attribute reference tables
-- KQL query cookbook
+- Gen AI semantic convention attribute reference
+- KQL query cookbook with token usage, cost estimation, and performance queries
+- Metrics query examples
+- Prompt logging configuration
 - Application Insights usage guide
 - Troubleshooting section
-- Best practices
+- Best practices for production use
 
 
 ## Telemetry Architecture
@@ -133,28 +182,48 @@ curl -X POST http://localhost:8000/run \
 
 ## Key Benefits
 
-1. **Visibility**: Every HTTP request traced from entry to exit
-2. **Token Tracking**: Know exactly how many tokens each agent uses
-3. **Cost Analysis**: Calculate LLM costs per agent or per request
-4. **Performance Optimization**: Identify slow agents or LLM calls
-5. **Error Detection**: Automatic exception tracking with context
-6. **Business Metrics**: Custom attributes for domain-specific analysis
+1. **Complete visibility** - Every HTTP request traced from entry to exit with detailed span hierarchy
+2. **Token tracking** - Precise token usage metrics per agent and operation
+3. **Cost analysis** - Real-time cost calculation and monitoring with metrics
+4. **Performance optimization** - Identify slow agents and LLM calls with latency metrics
+5. **Error detection** - Automatic exception tracking with full context
+6. **Business metrics** - Custom attributes for domain-specific analysis
+7. **Standards compliance** - OpenTelemetry Gen AI semantic conventions for better tool integration
+8. **Real-time monitoring** - Metrics and dashboards for operational awareness
+9. **Privacy controls** - Optional prompt logging with configurable truncation
+10. **Production ready** - All tests passing with comprehensive instrumentation
 
-## Steps
+## Usage
 
-1. **Start debug session** to load the new code
-2. **Make test requests** to generate telemetry
-3. **Open Application Insights** and navigate to:
-   - Transaction Search - see complete traces
-   - Logs - run KQL queries from TELEMETRY.md
-   - Performance - analyze agent durations
-   - Application Map - visualize dependencies
-4. **Set up alerts** for high token usage or latency
-5. **Create dashboards** for ongoing monitoring
+### Local Testing
 
-## KQL Quick Start
+Start the application and generate telemetry:
 
-View LLM token usage by agent:
+```bash
+# Start the service
+uvicorn src.agent.app:app --reload
+
+# Make a test request
+curl -X POST http://localhost:8000/run \
+  -H 'Content-Type: application/json' \
+  -d '{"task": "Plan an RV road trip from Seattle to Jacksonville. Visit at least 4 national parks. Trip duration 4 weeks."}'
+```
+
+### Viewing Telemetry in Application Insights
+
+Wait 1-2 minutes for telemetry to propagate, then:
+
+1. **Transaction Search** - View complete traces with span hierarchy
+2. **Logs** - Run KQL queries for analysis
+3. **Performance** - Analyze agent durations and bottlenecks
+4. **Application Map** - Visualize service dependencies
+5. **Metrics** - View real-time token usage and performance
+
+### Example KQL Queries
+
+### Example KQL Queries
+
+**Token usage by agent:**
 
 ```kusto
 dependencies
@@ -163,14 +232,43 @@ dependencies
 | where name startswith "llm.completion"
 | extend 
     agent = tostring(split(name, ".")[2]),
-    total_tokens = toint(customDimensions["llm.usage.total_tokens"])
+    input_tokens = toint(customDimensions["gen_ai.usage.input_tokens"]),
+    output_tokens = toint(customDimensions["gen_ai.usage.output_tokens"]),
+    model = tostring(customDimensions["gen_ai.request.model"])
 | summarize 
     calls = count(),
-    avg_tokens = avg(total_tokens),
-    total_tokens = sum(total_tokens)
-by agent
-| order by total_tokens desc
+    total_input = sum(input_tokens),
+    total_output = sum(output_tokens),
+    avg_duration = avg(duration)
+by agent, model
+| order by total_input desc
 ```
 
-See [Telemetry.md](./Telemetry.md) for  more query examples.
+**Token usage metrics:**
+
+```kusto
+customMetrics
+| where name == "gen_ai.client.token.usage"
+| extend 
+    token_type = tostring(customDimensions["gen_ai.token.type"]),
+    model = tostring(customDimensions["gen_ai.request.model"])
+| summarize TotalTokens = sum(value) by token_type, model
+```
+
+**Performance metrics:**
+
+```kusto
+customMetrics
+| where name == "gen_ai.client.operation.duration"
+| extend 
+    model = tostring(customDimensions["gen_ai.request.model"]),
+    operation = tostring(customDimensions["gen_ai.operation.name"])
+| summarize 
+    avg_ms = avg(value),
+    p95_ms = percentile(value, 95),
+    p99_ms = percentile(value, 99)
+by operation, model
+```
+
+See [Telemetry.md](./Telemetry.md) for comprehensive query examples including cost estimation, error analysis, and performance monitoring.
 

@@ -1,6 +1,13 @@
 from typing import Dict, Any
 import os
-from .instrumentation import traced_span, get_tracer, add_llm_response_attributes
+import time
+from .instrumentation import (
+    traced_span,
+    get_tracer,
+    add_llm_response_attributes,
+    log_llm_prompt_and_response,
+    record_llm_operation_duration
+)
 
 # Simple placeholder LLM call; replace with real model (GitHub Models / Azure OpenAI)
 # If OPENAI_API_KEY or GITHUB_MODELS_API_KEY not set, returns stub output.
@@ -34,13 +41,13 @@ def _call_llm(prompt: str, operation: str = "llm.completion") -> str:
             from openai import AzureOpenAI  # type: ignore
 
             with tracer.start_as_current_span(operation) as span:
-                # Set LLM-specific attributes
-                span.set_attribute("llm.system", "azure_openai")
-                span.set_attribute("llm.model", azure_deployment)
-                span.set_attribute("llm.request.max_tokens", 256)
-                span.set_attribute("llm.request.prompt_length", len(prompt))
-                span.set_attribute("llm.azure.endpoint", azure_endpoint)
-                span.set_attribute("llm.azure.api_version", azure_api_version)
+                start_time = time.time()
+                
+                # Set Gen AI semantic convention attributes
+                span.set_attribute("gen_ai.system", "azure_openai")
+                span.set_attribute("gen_ai.request.model", azure_deployment)
+                span.set_attribute("gen_ai.request.max_tokens", 256)
+                span.set_attribute("gen_ai.operation.name", operation)
                 
                 client = AzureOpenAI(
                     api_key=azure_key,
@@ -54,11 +61,19 @@ def _call_llm(prompt: str, operation: str = "llm.completion") -> str:
                     max_tokens=256,
                 )
                 
-                # Add response metrics to span
-                add_llm_response_attributes(span, completion)
+                duration_ms = (time.time() - start_time) * 1000
+                
+                # Add response metrics to span with model info for metrics
+                add_llm_response_attributes(span, completion, model=azure_deployment, operation=operation)
                 
                 result = completion.choices[0].message.content or ""
-                span.set_attribute("llm.response.length", len(result))
+                
+                # Log prompt and response as events (controlled by env var)
+                log_llm_prompt_and_response(span, prompt, result)
+                
+                # Record operation duration metric
+                record_llm_operation_duration(azure_deployment, operation, duration_ms)
+                
                 return result
         else:
             # Use standard OpenAI client for OpenAI or GitHub Models
@@ -68,12 +83,13 @@ def _call_llm(prompt: str, operation: str = "llm.completion") -> str:
             model_name = os.getenv("MODEL_NAME", "openai/gpt-4o-mini")
             
             with tracer.start_as_current_span(operation) as span:
-                span.set_attribute("llm.system", "openai")
-                span.set_attribute("llm.model", model_name)
-                span.set_attribute("llm.request.max_tokens", 256)
-                span.set_attribute("llm.request.prompt_length", len(prompt))
-                if base_url:
-                    span.set_attribute("llm.base_url", base_url)
+                start_time = time.time()
+                
+                # Set Gen AI semantic convention attributes
+                span.set_attribute("gen_ai.system", "openai")
+                span.set_attribute("gen_ai.request.model", model_name)
+                span.set_attribute("gen_ai.request.max_tokens", 256)
+                span.set_attribute("gen_ai.operation.name", operation)
                 
                 client = (
                     OpenAI(api_key=api_key, base_url=base_url) if base_url else OpenAI(api_key=api_key)
@@ -85,11 +101,19 @@ def _call_llm(prompt: str, operation: str = "llm.completion") -> str:
                     max_tokens=256,
                 )
                 
-                # Add response metrics to span
-                add_llm_response_attributes(span, completion)
+                duration_ms = (time.time() - start_time) * 1000
+                
+                # Add response metrics to span with model info for metrics
+                add_llm_response_attributes(span, completion, model=model_name, operation=operation)
                 
                 result = completion.choices[0].message.content or ""
-                span.set_attribute("llm.response.length", len(result))
+                
+                # Log prompt and response as events (controlled by env var)
+                log_llm_prompt_and_response(span, prompt, result)
+                
+                # Record operation duration metric
+                record_llm_operation_duration(model_name, operation, duration_ms)
+                
                 return result
     except Exception as e:  # noqa: BLE001
         return f"[llm-error-fallback] {e}"
